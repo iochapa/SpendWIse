@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpendWise — Spending Tracker</title>
+
+  <!-- Chart.js for the month-over-month dashboard graph -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* =====================================================================
+       DESIGN TOKENS — change these to retheme the whole app
+       ===================================================================== */
+    :root {
+      --bg:           #0f1117;       /* page background */
+      --surface:      #1a1d27;       /* card background */
+      --surface-alt:  #21253a;       /* slightly lighter card (inputs, rows) */
+      --border:       #2e3248;       /* subtle borders */
+      --accent:       #6c63ff;       /* primary purple */
+      --accent-light: #8b85ff;
+      --accent-glow:  rgba(108,99,255,.25);
+      --success:      #34d399;       /* green for under-budget */
+      --warning:      #f59e0b;       /* amber for near-limit */
+      --danger:       #ef4444;       /* red for over-limit */
+      --text:         #e8eaf0;
+      --text-muted:   #6b7280;
+      --radius:       12px;
+      --shadow:       0 4px 24px rgba(0,0,0,.4);
+    }
+
+    /* =====================================================================
+       RESET & BASE
+       ===================================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px 80px;
+    }
+
+    /* =====================================================================
+       LAYOUT — single-column centred, max 860px wide
+       ===================================================================== */
+    .app-wrapper {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* =====================================================================
+       HEADER
+       ===================================================================== */
+    .app-header {
+      text-align: center;
+      padding: 8px 0;
+    }
+    .app-header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--accent-light), var(--success));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .app-header p {
+      margin-top: 6px;
+      color: var(--text-muted);
+      font-size: .9rem;
+    }
+
+    /* =====================================================================
+       NAVIGATION TABS
+       ===================================================================== */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 4px;
+      border: 1px solid var(--border);
+    }
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 10px 0;
+      border-radius: 9px;
+      font-size: .9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .2s, color .2s;
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .tab-btn:not(.active):hover {
+      background: var(--surface-alt);
+      color: var(--text);
+    }
+
+    /* =====================================================================
+       CARD — reusable surface container
+       ===================================================================== */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* =====================================================================
+       TAB PANELS — only the active panel is shown
+       ===================================================================== */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: flex; flex-direction: column; gap: 24px; }
+
+    /* =====================================================================
+       BUDGET BANNER — shows monthly spend vs target at a glance
+       ===================================================================== */
+    .budget-banner {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      text-align: center;
+    }
+    .budget-banner .stat-label {
+      font-size: .75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 4px;
+    }
+    .budget-banner .stat-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+    .budget-banner .stat-value.spent  { color: var(--accent-light); }
+    .budget-banner .stat-value.target { color: var(--text); }
+    .budget-banner .stat-value.remain { color: var(--success); }
+    .budget-banner .stat-value.over   { color: var(--danger); }
+
+    /* Progress bar beneath the numbers */
+    .progress-track {
+      grid-column: 1 / -1;
+      background: var(--surface-alt);
+      border-radius: 999px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--success);
+      transition: width .5s ease, background .4s;
+    }
+    .progress-fill.warn { background: var(--warning); }
+    .progress-fill.over { background: var(--danger); }
+
+    /* =====================================================================
+       EXPENSE INPUT FORM
+       ===================================================================== */
+    .input-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 140px;
+    }
+    .input-group label {
+      font-size: .8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="month"],
+    select {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: .95rem;
+      padding: 10px 14px;
+      outline: none;
+      width: 100%;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    /* Remove number-input spinners for cleaner look */
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      border-radius: 8px;
+      font-size: .95rem;
+      font-weight: 600;
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary  { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: .88; }
+    .btn-danger   { background: transparent; border: 1px solid var(--danger);
+                    color: var(--danger); padding: 6px 12px; font-size: .8rem; }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .btn-ghost    { background: var(--surface-alt); color: var(--text-muted);
+                    border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); }
+
+    /* =====================================================================
+       EXPENSE LIST
+       ===================================================================== */
+    .expense-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      max-height: 380px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .expense-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      animation: slideIn .25s ease;
+    }
+    .expense-item:last-child { border-bottom: none; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .expense-icon {
+      width: 36px; height: 36px;
+      background: var(--surface-alt);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .expense-name {
+      flex: 1;
+      font-size: .95rem;
+    }
+    .expense-date {
+      font-size: .75rem;
+      color: var(--text-muted);
+    }
+    .expense-amount {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--accent-light);
+      min-width: 80px;
+      text-align: right;
+    }
+
+    /* Empty-state placeholder */
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 40px 0;
+      font-size: .9rem;
+    }
+    .empty-state span { font-size: 2rem; display: block; margin-bottom: 8px; }
+
+    /* =====================================================================
+       LIVE TOTAL FOOTER (pinned inside the card)
+       ===================================================================== */
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .total-row .label { font-size: .85rem; color: var(--text-muted); }
+    .total-row .total-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent-light);
+      transition: color .3s;
+    }
+
+    /* =====================================================================
+       BUDGET SETTINGS (inside Settings tab)
+       ===================================================================== */
+    .budget-form {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .budget-form .input-group { min-width: 180px; }
+
+    /* =====================================================================
+       MONTH SELECTOR (filter for expense list)
+       ===================================================================== */
+    .month-filter {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .month-filter label { color: var(--text-muted); font-size: .85rem; white-space: nowrap; }
+
+    /* =====================================================================
+       DASHBOARD PANEL
+       ===================================================================== */
+    .chart-container {
+      position: relative;
+      height: 300px;
+    }
+    .mom-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin-top: 4px;
+    }
+    .mom-card {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .mom-card .month-name { font-size: .75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .mom-card .month-amount { font-size: 1.15rem; font-weight: 700; }
+    .mom-card .mom-change {
+      font-size: .78rem;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .mom-change.up   { color: var(--danger); }
+    .mom-change.down { color: var(--success); }
+    .mom-change.flat { color: var(--text-muted); }
+
+    /* =====================================================================
+       CATEGORY ANALYSIS — breakdown + comparison cards
+       ===================================================================== */
+
+    /* Two-column layout: donut chart on the left, cards on the right.
+       On narrow screens the columns stack vertically. */
+    .cat-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    @media (max-width: 600px) {
+      .cat-layout { grid-template-columns: 1fr; }
+    }
+
+    /* Grid of per-category stat cards */
+    .cat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .cat-card {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    /* Coloured left-edge accent stripe — set via inline style per category */
+    .cat-card::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--cat-color, var(--accent));
+    }
+    .cat-card .cat-emoji   { font-size: 1.3rem; margin-bottom: 6px; }
+    .cat-card .cat-name    { font-size: .75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .cat-card .cat-amount  { font-size: 1.05rem; font-weight: 700; }
+    .cat-card .cat-meta    { font-size: .72rem; color: var(--text-muted); margin-top: 3px; }
+
+    /* Mini progress bar showing this category's share of the total */
+    .cat-bar-track {
+      background: var(--border);
+      border-radius: 999px;
+      height: 4px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .cat-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--cat-color, var(--accent));
+      transition: width .5s ease;
+    }
+
+    /* Month filter row inside the category card */
+    .cat-filter {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    .cat-filter label { font-size: .85rem; color: var(--text-muted); white-space: nowrap; }
+
+    /* =====================================================================
+       TOAST NOTIFICATION — slides in from top-right
+       ===================================================================== */
+    #toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      max-width: 320px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      pointer-events: all;
+      animation: toastIn .3s ease forwards;
+    }
+    .toast.removing { animation: toastOut .3s ease forwards; }
+    @keyframes toastIn  { from { opacity:0; transform: translateX(30px); } to { opacity:1; transform: translateX(0); } }
+    @keyframes toastOut { from { opacity:1; transform: translateX(0); } to { opacity:0; transform: translateX(30px); } }
+    .toast-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
+    .toast-body .toast-title { font-weight: 600; font-size: .9rem; margin-bottom: 2px; }
+    .toast-body .toast-msg   { font-size: .82rem; color: var(--text-muted); line-height: 1.4; }
+    .toast.warn  { border-left: 3px solid var(--warning); }
+    .toast.danger{ border-left: 3px solid var(--danger);  }
+    .toast.success{ border-left: 3px solid var(--success); }
+
+    /* =====================================================================
+       SCROLLBAR STYLING
+       ===================================================================== */
+    ::-webkit-scrollbar        { width: 6px; }
+    ::-webkit-scrollbar-track  { background: transparent; }
+    ::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- =========================================================================
+     TOAST CONTAINER — notifications are injected here by JS
+     ======================================================================= -->
+<div id="toast-container"></div>
+
+<!-- =========================================================================
+     MAIN APP SHELL
+     ======================================================================= -->
+<div class="app-wrapper">
+
+  <!-- Header -->
+  <header class="app-header">
+    <h1>💸 SpendWise</h1>
+    <p>Track every dollar. Stay in control.</p>
+  </header>
+
+  <!-- Navigation tabs -->
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="tracker"   role="tab">📋 Tracker</button>
+    <button class="tab-btn"        data-tab="dashboard" role="tab">📊 Dashboard</button>
+    <button class="tab-btn"        data-tab="settings"  role="tab">⚙️ Settings</button>
+  </nav>
+
+  <!-- =======================================================================
+       TAB 1 — TRACKER
+       ===================================================================== -->
+  <section id="tab-tracker" class="tab-panel active" role="tabpanel">
+
+    <!-- Budget summary banner (auto-updates on every change) -->
+    <div class="budget-banner" id="budget-banner">
+      <div>
+        <div class="stat-label">Spent this month</div>
+        <div class="stat-value spent" id="banner-spent">$0.00</div>
+      </div>
+      <div>
+        <div class="stat-label">Monthly target</div>
+        <div class="stat-value target" id="banner-target">—</div>
+      </div>
+      <div>
+        <div class="stat-label" id="banner-remain-label">Remaining</div>
+        <div class="stat-value remain" id="banner-remain">—</div>
+      </div>
+      <!-- Visual progress bar (green → amber → red) -->
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Add Expense Card -->
+    <div class="card">
+      <h2 class="card-title">➕ Add Expense</h2>
+
+      <div class="input-row">
+        <!-- Item description -->
+        <div class="input-group" style="flex:2">
+          <label for="item-name">Item / Description</label>
+          <input type="text" id="item-name" placeholder="e.g. Grocery run, Netflix…" autocomplete="off" />
+        </div>
+
+        <!-- Category emoji picker (improves list readability) -->
+        <div class="input-group" style="flex:1; min-width:120px">
+          <label for="item-cat">Category</label>
+          <select id="item-cat">
+            <option value="🛒">🛒 Groceries</option>
+            <option value="🍔">🍔 Dining</option>
+            <option value="🚗">🚗 Transport</option>
+            <option value="🎬">🎬 Entertainment</option>
+            <option value="💊">💊 Health</option>
+            <option value="🛍️">🛍️ Shopping</option>
+            <option value="🏠">🏠 Housing</option>
+            <option value="💡">💡 Utilities</option>
+            <option value="✈️">✈️ Travel</option>
+            <option value="🧑‍🧑‍🧒‍🧒"> 🧑‍🧑‍🧒‍🧒Family</option>
+            <option value="📦">📦 Other</option>
+          </select>
+        </div>
+
+        <!-- Amount -->
+        <div class="input-group" style="flex:1; min-width:120px">
+          <label for="item-amount">Amount ($)</label>
+          <input type="number" id="item-amount" placeholder="0.00" min="0" step="0.01" />
+        </div>
+
+        <!-- Date (defaults to today) -->
+        <div class="input-group" style="flex:1; min-width:140px">
+          <label for="item-date">Date</label>
+          <input type="date" id="item-date" />
+        </div>
+      </div>
+
+      <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="add-btn">Add Expense</button>
+        <!-- Keyboard shortcut hint -->
+        <span style="align-self:center; font-size:.78rem; color:var(--text-muted)">or press Enter</span>
+      </div>
+    </div>
+
+    <!-- Expense List Card -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+        <h2 class="card-title" style="margin-bottom:0">📑 Expenses</h2>
+
+        <!-- Month filter — filters the list without deleting data -->
+        <div class="month-filter">
+          <label for="month-filter">Month:</label>
+          <input type="month" id="month-filter" />
+          <button class="btn btn-ghost" id="clear-month-btn" style="padding:6px 12px; font-size:.8rem">All</button>
+        </div>
+      </div>
+
+      <!-- The list is rendered here by JS -->
+      <div class="expense-list" id="expense-list"></div>
+
+      <!-- Live running total -->
+      <div class="total-row">
+        <span class="label" id="total-label">Total (current view)</span>
+        <span class="total-value" id="total-display">$0.00</span>
+      </div>
+    </div>
+
+  </section><!-- /tracker -->
+
+  <!-- =======================================================================
+       TAB 2 — DASHBOARD
+       ===================================================================== -->
+  <section id="tab-dashboard" class="tab-panel" role="tabpanel">
+
+    <div class="card">
+      <h2 class="card-title">📊 Monthly Spending Overview</h2>
+      <!-- Chart.js canvas — height is controlled by .chart-container CSS -->
+      <div class="chart-container">
+        <canvas id="monthly-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">📈 Month-over-Month Breakdown</h2>
+      <!-- Cards with % change are rendered here by JS -->
+      <div class="mom-stats" id="mom-stats"></div>
+    </div>
+
+    <!-- Category Breakdown Card -->
+    <div class="card">
+      <h2 class="card-title">🏷️ Category Breakdown</h2>
+
+      <!-- Month selector — filters which month's expenses feed the chart.
+           Defaults to the current month; "All" shows the full history. -->
+      <div class="cat-filter">
+        <label for="cat-month-filter">Month:</label>
+        <input type="month" id="cat-month-filter" />
+        <button class="btn btn-ghost" id="cat-clear-month-btn"
+                style="padding:6px 12px; font-size:.8rem">All Time</button>
+      </div>
+
+      <!-- Left: donut chart   Right: per-category stat cards -->
+      <div class="cat-layout">
+        <div class="chart-container" style="height:250px">
+          <canvas id="cat-chart"></canvas>
+        </div>
+        <!-- Category cards injected here by renderCategoryAnalysis() -->
+        <div class="cat-grid" id="cat-grid"></div>
+      </div>
+    </div>
+
+  </section><!-- /dashboard -->
+
+  <!-- =======================================================================
+       TAB 3 — SETTINGS
+       ===================================================================== -->
+  <section id="tab-settings" class="tab-panel" role="tabpanel">
+
+    <!-- Budget Target Card -->
+    <div class="card">
+      <h2 class="card-title">🎯 Monthly Budget Target</h2>
+      <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:16px;">
+        Set the maximum you want to spend in a month.
+        You'll receive a warning notification when you reach 80 % and again when you exceed 100 %.
+      </p>
+
+      <div class="budget-form">
+        <div class="input-group">
+          <label for="budget-input">Target Amount ($)</label>
+          <input type="number" id="budget-input" placeholder="e.g. 2000" min="0" step="1" />
+        </div>
+        <button class="btn btn-primary" id="save-budget-btn">Save Target</button>
+        <button class="btn btn-ghost"   id="clear-budget-btn">Clear</button>
+      </div>
+
+      <!-- Confirmation of currently saved target -->
+      <p id="budget-confirm" style="margin-top:12px; font-size:.85rem; color:var(--success);"></p>
+    </div>
+
+    <!-- Danger Zone — clear all data -->
+    <div class="card" style="border-color: #3a1f1f;">
+      <h2 class="card-title" style="color:var(--danger)">⚠️ Danger Zone</h2>
+      <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:16px;">
+        Permanently delete all expenses. This cannot be undone.
+      </p>
+      <button class="btn btn-danger" id="clear-all-btn">Delete All Expenses</button>
+    </div>
+
+  </section><!-- /settings -->
+
+</div><!-- /app-wrapper -->
+
+
+<!-- =========================================================================
+     JAVASCRIPT — all logic in one self-contained script
+     ======================================================================= -->
+<script>
+"use strict";
+
+/* ==========================================================================
+   SECTION 1 — DATA LAYER
+   All reads/writes go through these helpers so the storage key is centralised.
+   Data shape stored in localStorage:
+     "sw_expenses"  →  Array<{ id, name, category, amount, date }>
+     "sw_budget"    →  number | null
+   ========================================================================== */
+
+const STORAGE_KEYS = {
+  expenses : "sw_expenses",
+  budget   : "sw_budget",
+};
+
+/** Return every stored expense, or [] if none yet. */
+function loadExpenses() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.expenses)) || [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the full expenses array to localStorage. */
+function saveExpenses(expenses) {
+  localStorage.setItem(STORAGE_KEYS.expenses, JSON.stringify(expenses));
+}
+
+/** Return the saved monthly budget target, or null if none set. */
+function loadBudget() {
+  const v = localStorage.getItem(STORAGE_KEYS.budget);
+  return v !== null ? parseFloat(v) : null;
+}
+
+/** Persist the monthly budget target. Pass null to clear it. */
+function saveBudget(value) {
+  if (value === null) {
+    localStorage.removeItem(STORAGE_KEYS.budget);
+  } else {
+    localStorage.setItem(STORAGE_KEYS.budget, String(value));
+  }
+}
+
+/** Generate a simple unique ID (timestamp + random suffix). */
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/* ==========================================================================
+   SECTION 2 — DATE HELPERS
+   ========================================================================== */
+
+/**
+ * Return the YYYY-MM string for a given Date (defaults to today).
+ * Used to group expenses by calendar month.
+ */
+function toYearMonth(dateStr) {
+  // dateStr is "YYYY-MM-DD"; slice the first 7 chars gives "YYYY-MM"
+  return dateStr ? dateStr.slice(0, 7) : "";
+}
+
+/** Return today's date as "YYYY-MM-DD" (local timezone). */
+function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Return current "YYYY-MM" string. */
+function thisYearMonth() {
+  return todayISO().slice(0, 7);
+}
+
+/**
+ * Format "YYYY-MM" as a human-readable label, e.g. "May 2025".
+ */
+function formatYearMonth(ym) {
+  const [y, m] = ym.split("-");
+  const date = new Date(Number(y), Number(m) - 1, 1);
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+/* ==========================================================================
+   SECTION 3 — DOM REFERENCES
+   Grab all the elements we'll manipulate at runtime.
+   ========================================================================== */
+
+const dom = {
+  // Tabs
+  tabBtns     : document.querySelectorAll(".tab-btn"),
+  tabPanels   : document.querySelectorAll(".tab-panel"),
+
+  // Tracker inputs
+  itemName    : document.getElementById("item-name"),
+  itemCat     : document.getElementById("item-cat"),
+  itemAmount  : document.getElementById("item-amount"),
+  itemDate    : document.getElementById("item-date"),
+  addBtn      : document.getElementById("add-btn"),
+
+  // Month filter
+  monthFilter    : document.getElementById("month-filter"),
+  clearMonthBtn  : document.getElementById("clear-month-btn"),
+
+  // Expense list + live total
+  expenseList    : document.getElementById("expense-list"),
+  totalDisplay   : document.getElementById("total-display"),
+  totalLabel     : document.getElementById("total-label"),
+
+  // Budget banner elements
+  bannerSpent    : document.getElementById("banner-spent"),
+  bannerTarget   : document.getElementById("banner-target"),
+  bannerRemain   : document.getElementById("banner-remain"),
+  bannerRemainLbl: document.getElementById("banner-remain-label"),
+  progressFill   : document.getElementById("progress-fill"),
+
+  // Settings
+  budgetInput    : document.getElementById("budget-input"),
+  saveBudgetBtn  : document.getElementById("save-budget-btn"),
+  clearBudgetBtn : document.getElementById("clear-budget-btn"),
+  budgetConfirm  : document.getElementById("budget-confirm"),
+  clearAllBtn    : document.getElementById("clear-all-btn"),
+
+  // Dashboard — monthly chart + MoM cards
+  monthlyChart   : document.getElementById("monthly-chart"),
+  momStats       : document.getElementById("mom-stats"),
+
+  // Dashboard — category breakdown
+  catChart       : document.getElementById("cat-chart"),
+  catGrid        : document.getElementById("cat-grid"),
+  catMonthFilter : document.getElementById("cat-month-filter"),
+  catClearMonth  : document.getElementById("cat-clear-month-btn"),
+
+  // Toast
+  toastContainer : document.getElementById("toast-container"),
+};
+
+/* ==========================================================================
+   SECTION 4 — STATE
+   Single source of truth for the currently active filter.
+   ========================================================================== */
+
+const state = {
+  /** Active month filter string "YYYY-MM", or "" for all months. */
+  filterMonth: thisYearMonth(),
+  /** Month filter specifically for the category breakdown chart. */
+  catFilterMonth: thisYearMonth(),
+};
+
+/* ==========================================================================
+   SECTION 5 — TOAST NOTIFICATION SYSTEM
+   showToast({ type, title, message }) renders a slide-in notification.
+   type: "success" | "warn" | "danger"
+   ========================================================================== */
+
+const TOAST_ICONS = { success: "✅", warn: "⚠️", danger: "🚨" };
+
+/**
+ * Display a toast notification for `durationMs` milliseconds.
+ * Called whenever spending milestones are crossed.
+ */
+function showToast({ type = "success", title, message, durationMs = 5000 }) {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">${TOAST_ICONS[type] || "ℹ️"}</div>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${message}</div>
+    </div>
+  `;
+  dom.toastContainer.appendChild(toast);
+
+  // Auto-remove after durationMs
+  setTimeout(() => {
+    toast.classList.add("removing");
+    toast.addEventListener("animationend", () => toast.remove());
+  }, durationMs);
+}
+
+/* ==========================================================================
+   SECTION 6 — BUDGET BANNER & PROGRESS BAR
+   Called after every add/delete so the banner always reflects current totals.
+   ========================================================================== */
+
+/**
+ * Recalculate the current-month spent total, then update the budget
+ * banner elements and progress bar.  Also triggers warnings if thresholds
+ * are crossed for the first time in this session.
+ */
+let _lastWarningLevel = null; // tracks so we don't spam the same toast
+
+function refreshBudgetBanner() {
+  const expenses = loadExpenses();
+  const budget   = loadBudget();
+  const ym       = thisYearMonth();
+
+  // Sum only the expenses that belong to the current calendar month
+  const spent = expenses
+    .filter(e => toYearMonth(e.date) === ym)
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  dom.bannerSpent.textContent = formatCurrency(spent);
+
+  if (budget === null) {
+    // No target set — hide the remaining/progress elements gracefully
+    dom.bannerTarget.textContent    = "Not set";
+    dom.bannerRemain.textContent    = "—";
+    dom.bannerRemainLbl.textContent = "Remaining";
+    dom.bannerRemain.className      = "stat-value remain";
+    dom.progressFill.style.width    = "0%";
+    dom.progressFill.className      = "progress-fill";
+    _lastWarningLevel = null;
+    return;
+  }
+
+  const remaining = budget - spent;
+  const pct       = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+
+  dom.bannerTarget.textContent = formatCurrency(budget);
+
+  // Update remaining amount (red when over-budget)
+  if (remaining < 0) {
+    dom.bannerRemain.textContent    = `-${formatCurrency(Math.abs(remaining))}`;
+    dom.bannerRemainLbl.textContent = "Over budget";
+    dom.bannerRemain.className      = "stat-value over";
+  } else {
+    dom.bannerRemain.textContent    = formatCurrency(remaining);
+    dom.bannerRemainLbl.textContent = "Remaining";
+    dom.bannerRemain.className      = "stat-value remain";
+  }
+
+  // Update progress bar colour
+  dom.progressFill.style.width = `${pct}%`;
+  dom.progressFill.className   = "progress-fill" +
+    (pct >= 100 ? " over" : pct >= 80 ? " warn" : "");
+
+  // ── Threshold notifications ──────────────────────────────────────────────
+  // We track the highest warning level already shown this session so we
+  // don't repeat the same toast every time the user adds an expense.
+
+  if (pct >= 100 && _lastWarningLevel !== "over") {
+    _lastWarningLevel = "over";
+    showToast({
+      type   : "danger",
+      title  : "Budget Exceeded!",
+      message: `You've spent ${formatCurrency(spent)} — ${formatCurrency(Math.abs(remaining))} over your ${formatCurrency(budget)} target.`,
+      durationMs: 8000,
+    });
+  } else if (pct >= 80 && pct < 100 && _lastWarningLevel !== "warn") {
+    _lastWarningLevel = "warn";
+    showToast({
+      type   : "warn",
+      title  : "Approaching Budget Limit",
+      message: `You've used ${pct.toFixed(0)}% of your ${formatCurrency(budget)} monthly target.`,
+      durationMs: 6000,
+    });
+  } else if (pct < 80) {
+    // Reset so warnings fire again if user deletes expenses then adds more
+    _lastWarningLevel = null;
+  }
+}
+
+/* ==========================================================================
+   SECTION 7 — EXPENSE LIST RENDERER
+   Re-renders the full list whenever data or the filter changes.
+   ========================================================================== */
+
+/** Format a number as USD currency string, e.g. "$1,234.56" */
+function formatCurrency(n) {
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Render the expense list for the currently active filter month.
+ * Also updates the live-total footer label and refreshes the budget banner.
+ */
+function renderExpenseList() {
+  const allExpenses = loadExpenses();
+
+  // Apply month filter
+  const filtered = state.filterMonth
+    ? allExpenses.filter(e => toYearMonth(e.date) === state.filterMonth)
+    : allExpenses;
+
+  // Sort newest-first so the latest entry is at the top
+  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date));
+
+  // Live running total for the current view
+  const total = sorted.reduce((sum, e) => sum + e.amount, 0);
+  dom.totalDisplay.textContent = formatCurrency(total);
+  dom.totalLabel.textContent   = state.filterMonth
+    ? `Total — ${formatYearMonth(state.filterMonth)}`
+    : "Total — All Time";
+
+  // ── Render list items ────────────────────────────────────────────────────
+  if (sorted.length === 0) {
+    dom.expenseList.innerHTML = `
+      <div class="empty-state">
+        <span>🪹</span>No expenses found.
+        ${state.filterMonth ? "Try clearing the month filter." : "Add your first expense above!"}
+      </div>`;
+    return;
+  }
+
+  dom.expenseList.innerHTML = sorted.map(expense => `
+    <div class="expense-item" data-id="${expense.id}">
+      <div class="expense-icon">${expense.category}</div>
+      <div style="flex:1; min-width:0">
+        <div class="expense-name">${escapeHtml(expense.name)}</div>
+        <div class="expense-date">${formatDate(expense.date)}</div>
+      </div>
+      <div class="expense-amount">${formatCurrency(expense.amount)}</div>
+      <!-- Delete button — each item carries its own ID for targeted removal -->
+      <button class="btn btn-danger" data-delete="${expense.id}" title="Delete">✕</button>
+    </div>
+  `).join("");
+
+  // Attach delete handlers to each row's button
+  dom.expenseList.querySelectorAll("[data-delete]").forEach(btn => {
+    btn.addEventListener("click", () => deleteExpense(btn.dataset.delete));
+  });
+}
+
+/** Format "YYYY-MM-DD" as "Mon D, YYYY", e.g. "May 9, 2025" */
+function formatDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+}
+
+/** Escape user-supplied text to prevent XSS in innerHTML. */
+function escapeHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* ==========================================================================
+   SECTION 8 — CRUD ACTIONS
+   ========================================================================== */
+
+/**
+ * Validate the form, create a new expense object, persist it,
+ * then refresh the UI and check budget thresholds.
+ */
+function addExpense() {
+  const name   = dom.itemName.value.trim();
+  const amount = parseFloat(dom.itemAmount.value);
+  const date   = dom.itemDate.value;
+  const cat    = dom.itemCat.value;
+
+  // ── Input validation ─────────────────────────────────────────────────────
+  if (!name) {
+    highlightInvalid(dom.itemName, "Please enter a description.");
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    highlightInvalid(dom.itemAmount, "Please enter a valid positive amount.");
+    return;
+  }
+  if (!date) {
+    highlightInvalid(dom.itemDate, "Please pick a date.");
+    return;
+  }
+
+  // Build the new expense record
+  const expense = { id: uid(), name, category: cat, amount, date };
+
+  // Persist
+  const expenses = loadExpenses();
+  expenses.push(expense);
+  saveExpenses(expenses);
+
+  // Reset form (keep date and category for quick sequential entry)
+  dom.itemName.value   = "";
+  dom.itemAmount.value = "";
+  dom.itemName.focus();
+
+  // Refresh all views
+  refreshAll();
+
+  showToast({ type: "success", title: "Expense Added", message: `${cat} ${name} — ${formatCurrency(amount)}`, durationMs: 3000 });
+}
+
+/** Remove a single expense by its ID, then refresh. */
+function deleteExpense(id) {
+  const expenses = loadExpenses().filter(e => e.id !== id);
+  saveExpenses(expenses);
+  refreshAll();
+}
+
+/** Flash a red border on an input and show a tooltip-style message. */
+function highlightInvalid(input, msg) {
+  input.style.borderColor = "var(--danger)";
+  input.title = msg;
+  input.focus();
+  setTimeout(() => { input.style.borderColor = ""; input.title = ""; }, 2500);
+}
+
+/* ==========================================================================
+   SECTION 9 — DASHBOARD (Chart.js)
+   Builds / updates a bar chart showing monthly totals and renders the
+   month-over-month change cards beneath it.
+   ========================================================================== */
+
+/** Chart.js instance — kept so we can .destroy() and re-create it cleanly. */
+let chartInstance = null;
+
+/**
+ * Aggregate all expenses by month, then build the bar chart and the
+ * month-over-month stat cards.
+ */
+function renderDashboard() {
+  const expenses = loadExpenses();
+  const budget   = loadBudget();
+
+  // ── Build a map: "YYYY-MM" → total spent ────────────────────────────────
+  const monthMap = {};
+  expenses.forEach(e => {
+    const ym = toYearMonth(e.date);
+    monthMap[ym] = (monthMap[ym] || 0) + e.amount;
+  });
+
+  // Sort months chronologically
+  const months = Object.keys(monthMap).sort();
+
+  if (months.length === 0) {
+    dom.momStats.innerHTML = `
+      <p style="color:var(--text-muted); font-size:.88rem; padding:20px 0">
+        No expense data yet. Add some expenses in the Tracker tab.
+      </p>`;
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    return;
+  }
+
+  const labels = months.map(formatYearMonth);
+  const values = months.map(ym => parseFloat(monthMap[ym].toFixed(2)));
+
+  // ── Chart colours — bars are accent purple; over-budget bars turn red ───
+  const barColors = values.map((v, i) => {
+    if (budget !== null && v > budget) return "rgba(239,68,68,.8)";   // over
+    return "rgba(108,99,255,.8)";                                       // normal
+  });
+
+  // ── Destroy old chart before re-creating ────────────────────────────────
+  if (chartInstance) { chartInstance.destroy(); }
+
+  chartInstance = new Chart(dom.monthlyChart, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label      : "Monthly Spending ($)",
+        data       : values,
+        backgroundColor : barColors,
+        borderColor     : barColors.map(c => c.replace(".8)", "1)")),
+        borderWidth : 1,
+        borderRadius: 6,
+      },
+      // Optional: draw a horizontal budget target line
+      ...(budget !== null ? [{
+        type   : "line",
+        label  : "Budget Target",
+        data   : values.map(() => budget),
+        borderColor : "rgba(245,158,11,.8)",
+        borderDash  : [6, 3],
+        borderWidth : 2,
+        pointRadius : 0,
+        fill        : false,
+      }] : []),
+    ]},
+    options: {
+      responsive        : true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend : { labels : { color: "#e8eaf0", font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            // Show currency in tooltip
+            label: ctx => ` ${formatCurrency(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks : { color: "#6b7280" },
+          grid  : { color: "rgba(255,255,255,.05)" },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color   : "#6b7280",
+            callback: v => "$" + v.toLocaleString(),
+          },
+          grid: { color: "rgba(255,255,255,.05)" },
+        },
+      },
+    },
+  });
+
+  // ── Month-over-month change cards ────────────────────────────────────────
+  dom.momStats.innerHTML = months.map((ym, i) => {
+    const amount = monthMap[ym];
+    let changeHtml = `<span class="mom-change flat">— First month</span>`;
+
+    if (i > 0) {
+      const prev   = monthMap[months[i - 1]];
+      const delta  = amount - prev;
+      const deltaPct = prev !== 0 ? ((delta / prev) * 100).toFixed(1) : "∞";
+      const dir    = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+      const arrow  = delta > 0 ? "▲" : delta < 0 ? "▼" : "–";
+      changeHtml = `
+        <span class="mom-change ${dir}">
+          ${arrow} ${Math.abs(deltaPct)}%
+          (${delta >= 0 ? "+" : ""}${formatCurrency(delta)})
+        </span>`;
+    }
+
+    return `
+      <div class="mom-card">
+        <div class="month-name">${formatYearMonth(ym)}</div>
+        <div class="month-amount">${formatCurrency(amount)}</div>
+        ${changeHtml}
+      </div>`;
+  }).join("");
+}
+
+/* ==========================================================================
+   SECTION 9B — CATEGORY ANALYSIS
+   Renders a donut chart + per-category stat cards for the selected month
+   (or all time). Called from renderDashboard() and its own filter controls.
+   ========================================================================== */
+
+/**
+ * A fixed palette of distinct colours assigned to categories in order of
+ * appearance. Enough colours for all built-in categories plus extras.
+ */
+const CAT_PALETTE = [
+  "#6c63ff", "#34d399", "#f59e0b", "#ef4444", "#3b82f6",
+  "#ec4899", "#14b8a6", "#f97316", "#8b5cf6", "#84cc16", "#06b6d4",
+];
+
+/** Chart.js donut instance for the category chart. */
+let catChartInstance = null;
+
+/**
+ * Aggregate expenses by category for the active catFilterMonth (or all
+ * time if blank), then render the donut chart and comparison cards.
+ */
+function renderCategoryAnalysis() {
+  const allExpenses = loadExpenses();
+
+  // Apply the category-section month filter
+  const expenses = state.catFilterMonth
+    ? allExpenses.filter(e => toYearMonth(e.date) === state.catFilterMonth)
+    : allExpenses;
+
+  if (expenses.length === 0) {
+    dom.catGrid.innerHTML = `
+      <p style="color:var(--text-muted); font-size:.88rem; grid-column:1/-1; padding:10px 0">
+        No expenses found for this period.
+      </p>`;
+    if (catChartInstance) { catChartInstance.destroy(); catChartInstance = null; }
+    return;
+  }
+
+  // ── Build per-category totals and counts ─────────────────────────────────
+  // catMap: emoji → { label, total, count }
+  // We derive the human-readable label from the select options so the
+  // donut legend shows "Groceries" not just "🛒".
+  const catLabelMap = {};
+  document.querySelectorAll("#item-cat option").forEach(opt => {
+    // opt.value is the emoji; opt.text is e.g. "🛒 Groceries"
+    catLabelMap[opt.value] = opt.text.replace(opt.value, "").trim();
+  });
+
+  const catMap = {};
+  expenses.forEach(e => {
+    if (!catMap[e.category]) {
+      catMap[e.category] = {
+        emoji : e.category,
+        label : catLabelMap[e.category] || e.category,
+        total : 0,
+        count : 0,
+      };
+    }
+    catMap[e.category].total += e.amount;
+    catMap[e.category].count += 1;
+  });
+
+  // Sort categories by total descending (highest spend first)
+  const cats = Object.values(catMap).sort((a, b) => b.total - a.total);
+  const grandTotal = cats.reduce((s, c) => s + c.total, 0);
+
+  // Assign a colour to each category in sorted order
+  cats.forEach((c, i) => { c.color = CAT_PALETTE[i % CAT_PALETTE.length]; });
+
+  // ── Donut chart ──────────────────────────────────────────────────────────
+  if (catChartInstance) { catChartInstance.destroy(); }
+
+  catChartInstance = new Chart(dom.catChart, {
+    type: "doughnut",
+    data: {
+      labels  : cats.map(c => c.label),
+      datasets: [{
+        data           : cats.map(c => parseFloat(c.total.toFixed(2))),
+        backgroundColor: cats.map(c => c.color + "cc"),  // slight transparency
+        borderColor    : cats.map(c => c.color),
+        borderWidth    : 2,
+        hoverOffset    : 6,
+      }],
+    },
+    options: {
+      responsive         : true,
+      maintainAspectRatio: false,
+      cutout             : "62%",   // controls the donut hole size
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels  : {
+            color    : "#e8eaf0",
+            font     : { size: 11 },
+            boxWidth : 12,
+            padding  : 10,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            // Show "$amount (xx%)" in the tooltip
+            label: ctx => {
+              const val = ctx.parsed;
+              const pct = grandTotal > 0 ? ((val / grandTotal) * 100).toFixed(1) : 0;
+              return `  ${formatCurrency(val)}  (${pct}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // ── Per-category comparison cards ────────────────────────────────────────
+  dom.catGrid.innerHTML = cats.map(c => {
+    const pct      = grandTotal > 0 ? ((c.total / grandTotal) * 100).toFixed(1) : 0;
+    const avgPerTx = c.count > 0 ? c.total / c.count : 0;
+
+    return `
+      <div class="cat-card" style="--cat-color:${c.color}">
+        <div class="cat-emoji">${c.emoji}</div>
+        <div class="cat-name">${c.label}</div>
+        <div class="cat-amount">${formatCurrency(c.total)}</div>
+        <div class="cat-meta">${c.count} transaction${c.count !== 1 ? "s" : ""}
+          · avg ${formatCurrency(avgPerTx)}</div>
+        <!-- Mini bar shows this category's share of total spend -->
+        <div class="cat-bar-track">
+          <div class="cat-bar-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="cat-meta" style="margin-top:4px">${pct}% of total</div>
+      </div>`;
+  }).join("");
+}
+
+/* ==========================================================================
+   SECTION 10 — SETTINGS HANDLERS
+   ========================================================================== */
+
+/** Persist a new budget target from the settings form input. */
+function handleSaveBudget() {
+  const val = parseFloat(dom.budgetInput.value);
+  if (isNaN(val) || val <= 0) {
+    highlightInvalid(dom.budgetInput, "Please enter a positive dollar amount.");
+    return;
+  }
+  saveBudget(val);
+  dom.budgetConfirm.textContent = `✓ Monthly target set to ${formatCurrency(val)}`;
+  // Reset warning tracker so thresholds fire fresh against the new target
+  _lastWarningLevel = null;
+  refreshAll();
+  showToast({ type: "success", title: "Budget Saved", message: `Monthly target: ${formatCurrency(val)}` });
+}
+
+/** Clear the saved budget target. */
+function handleClearBudget() {
+  saveBudget(null);
+  dom.budgetInput.value        = "";
+  dom.budgetConfirm.textContent = "Budget target cleared.";
+  _lastWarningLevel = null;
+  refreshAll();
+}
+
+/** Delete all expense records after a confirmation prompt. */
+function handleClearAll() {
+  if (!confirm("Delete ALL expenses permanently? This cannot be undone.")) return;
+  saveExpenses([]);
+  refreshAll();
+  showToast({ type: "warn", title: "Data Cleared", message: "All expenses have been deleted." });
+}
+
+/* ==========================================================================
+   SECTION 11 — UNIFIED REFRESH
+   One function to refresh every UI section at once; called after any
+   data mutation so all views stay in sync.
+   ========================================================================== */
+
+function refreshAll() {
+  renderExpenseList();
+  refreshBudgetBanner();
+  // Only re-render charts if the dashboard tab is currently visible
+  // (avoids creating a Chart.js canvas on a hidden element)
+  if (document.getElementById("tab-dashboard").classList.contains("active")) {
+    renderDashboard();
+    renderCategoryAnalysis();
+  }
+  // Keep settings budget-confirm label in sync
+  const b = loadBudget();
+  if (b !== null) {
+    dom.budgetConfirm.textContent = `Current target: ${formatCurrency(b)}`;
+    dom.budgetInput.value         = b;
+  } else {
+    dom.budgetConfirm.textContent = "";
+    dom.budgetInput.value         = "";
+  }
+}
+
+/* ==========================================================================
+   SECTION 12 — TAB NAVIGATION
+   ========================================================================== */
+
+dom.tabBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    // Deactivate all tabs and panels
+    dom.tabBtns.forEach(b   => b.classList.remove("active"));
+    dom.tabPanels.forEach(p => p.classList.remove("active"));
+
+    // Activate the clicked tab and its matching panel
+    btn.classList.add("active");
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
+
+    // Render the dashboard lazily when its tab is opened
+    if (btn.dataset.tab === "dashboard") {
+      renderDashboard();
+      renderCategoryAnalysis();
+    }
+  });
+});
+
+/* ==========================================================================
+   SECTION 13 — EVENT WIRING
+   ========================================================================== */
+
+// Add expense on button click
+dom.addBtn.addEventListener("click", addExpense);
+
+// Also allow Enter key in any input field to submit the form
+[dom.itemName, dom.itemAmount, dom.itemDate].forEach(input => {
+  input.addEventListener("keydown", e => { if (e.key === "Enter") addExpense(); });
+});
+
+// Month filter
+dom.monthFilter.addEventListener("change", () => {
+  state.filterMonth = dom.monthFilter.value; // "YYYY-MM" or ""
+  renderExpenseList();
+});
+
+// "All" button clears the month filter
+dom.clearMonthBtn.addEventListener("click", () => {
+  state.filterMonth     = "";
+  dom.monthFilter.value = "";
+  renderExpenseList();
+});
+
+// Category month filter
+dom.catMonthFilter.addEventListener("change", () => {
+  state.catFilterMonth = dom.catMonthFilter.value;
+  renderCategoryAnalysis();
+});
+dom.catClearMonth.addEventListener("click", () => {
+  state.catFilterMonth     = "";
+  dom.catMonthFilter.value = "";
+  renderCategoryAnalysis();
+});
+
+// Settings
+dom.saveBudgetBtn.addEventListener("click", handleSaveBudget);
+dom.clearBudgetBtn.addEventListener("click", handleClearBudget);
+dom.clearAllBtn.addEventListener("click", handleClearAll);
+
+/* ==========================================================================
+   SECTION 14 — INITIALISATION
+   ========================================================================== */
+
+/** Bootstrap: set default date to today and render the initial UI. */
+function init() {
+  dom.itemDate.value        = todayISO();
+  dom.monthFilter.value     = thisYearMonth();
+  dom.catMonthFilter.value  = thisYearMonth();
+  refreshAll();
+}
+
+init();
+</script>
+</body>
+</html>
