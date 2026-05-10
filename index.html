@@ -718,6 +718,23 @@
   <!-- SETTINGS TAB -->
   <section id="tab-settings" class="tab-panel" role="tabpanel">
 
+    <!-- Currency Selector Card -->
+    <div class="card">
+      <h2 class="card-title">💱 Currency</h2>
+      <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:16px;">
+        Choose your currency. All amounts across the app will update instantly.
+        Your preference is saved to the cloud and synced across devices.
+      </p>
+      <div class="budget-form">
+        <div class="input-group">
+          <label for="currency-select">Currency</label>
+          <select id="currency-select"></select>
+        </div>
+        <button class="btn btn-primary" id="save-currency-btn">Save Currency</button>
+      </div>
+      <p id="currency-confirm" style="margin-top:12px; font-size:.85rem; color:var(--success);"></p>
+    </div>
+
     <div class="card">
       <h2 class="card-title">🎯 Monthly Budget Target</h2>
       <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:16px;">
@@ -774,15 +791,56 @@ const db             = firebase.firestore();
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 
 /* ==========================================================================
-   SECTION 2 — GLOBAL IN-MEMORY STATE
+   SECTION 2 — CURRENCY DEFINITIONS
+   Full list of supported currencies. Each entry has:
+     code   — ISO 4217 code shown in the selector
+     symbol — prepended to every formatted amount
+     name   — human-readable label shown in the dropdown
+   ========================================================================== */
+
+const CURRENCIES = [
+  { code:"USD", symbol:"$",    name:"US Dollar" },
+  { code:"NGN", symbol:"₦",    name:"Nigerian Naira" },
+  { code:"EUR", symbol:"€",    name:"Euro" },
+  { code:"GBP", symbol:"£",    name:"British Pound" },
+  { code:"CAD", symbol:"CA$",  name:"Canadian Dollar" },
+  { code:"AUD", symbol:"A$",   name:"Australian Dollar" },
+  { code:"JPY", symbol:"¥",    name:"Japanese Yen" },
+  { code:"CNY", symbol:"CN¥",  name:"Chinese Yuan" },
+  { code:"INR", symbol:"₹",    name:"Indian Rupee" },
+  { code:"BRL", symbol:"R$",   name:"Brazilian Real" },
+  { code:"MXN", symbol:"MX$",  name:"Mexican Peso" },
+  { code:"ZAR", symbol:"R",    name:"South African Rand" },
+  { code:"GHS", symbol:"₵",    name:"Ghanaian Cedi" },
+  { code:"KES", symbol:"KSh",  name:"Kenyan Shilling" },
+  { code:"EGP", symbol:"E£",   name:"Egyptian Pound" },
+  { code:"CHF", symbol:"Fr",   name:"Swiss Franc" },
+  { code:"SEK", symbol:"kr",   name:"Swedish Krona" },
+  { code:"NOK", symbol:"kr",   name:"Norwegian Krone" },
+  { code:"DKK", symbol:"kr",   name:"Danish Krone" },
+  { code:"SGD", symbol:"S$",   name:"Singapore Dollar" },
+  { code:"HKD", symbol:"HK$",  name:"Hong Kong Dollar" },
+  { code:"AED", symbol:"د.إ",  name:"UAE Dirham" },
+  { code:"SAR", symbol:"﷼",    name:"Saudi Riyal" },
+  { code:"TRY", symbol:"₺",    name:"Turkish Lira" },
+  { code:"PKR", symbol:"₨",    name:"Pakistani Rupee" },
+  { code:"PHP", symbol:"₱",    name:"Philippine Peso" },
+  { code:"IDR", symbol:"Rp",   name:"Indonesian Rupiah" },
+  { code:"THB", symbol:"฿",    name:"Thai Baht" },
+  { code:"MYR", symbol:"RM",   name:"Malaysian Ringgit" },
+];
+
+/* ==========================================================================
+   SECTION 3 — GLOBAL IN-MEMORY STATE
    The Firestore real-time listener pushes updates into these variables.
    All render functions read from them — no direct DB calls at render time.
    ========================================================================== */
 
-let currentExpenses      = [];    // kept in sync by onSnapshot
-let currentBudget        = null;  // number | null, read from Firestore on login
-let currentUser          = null;  // Firebase User object when signed in
-let unsubscribeExpenses  = null;  // cleanup fn returned by onSnapshot
+let currentExpenses      = [];                // kept in sync by onSnapshot
+let currentBudget        = null;              // number | null
+let currentCurrency      = CURRENCIES[0];     // default USD until loaded from Firestore
+let currentUser          = null;              // Firebase User object when signed in
+let unsubscribeExpenses  = null;              // cleanup fn returned by onSnapshot
 
 /* ==========================================================================
    SECTION 3 — FIRESTORE PATH HELPERS
@@ -797,6 +855,44 @@ function expensesRef() {
 /** Firestore document for the signed-in user's budget setting. */
 function budgetDocRef() {
   return db.collection("users").doc(currentUser.uid).collection("settings").doc("budget");
+}
+
+/** Firestore document for the signed-in user's currency preference. */
+function currencyDocRef() {
+  return db.collection("users").doc(currentUser.uid).collection("settings").doc("currency");
+}
+
+/** Read saved currency from Firestore; falls back to USD if not set. */
+async function loadCurrencyFromFirestore() {
+  try {
+    const snap = await currencyDocRef().get();
+    if (snap.exists) {
+      const saved = CURRENCIES.find(c => c.code === snap.data().code);
+      if (saved) currentCurrency = saved;
+    }
+  } catch {
+    // keep default USD
+  }
+}
+
+/** Persist the selected currency code to Firestore. */
+async function saveCurrencyToFirestore(code) {
+  setSyncing(true);
+  try {
+    await currencyDocRef().set({ code });
+    currentCurrency = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
+    // Re-render everything that shows currency values
+    renderExpenseList();
+    refreshBudgetBannerUI();
+    renderExport();
+    if (document.getElementById("tab-dashboard").classList.contains("active")) {
+      renderDashboard();
+      renderCategoryAnalysis();
+    }
+    syncSettingsUI();
+  } finally {
+    setSyncing(false);
+  }
 }
 
 /* ==========================================================================
@@ -852,6 +948,10 @@ const dom = {
   bannerRemain   : document.getElementById("banner-remain"),
   bannerRemainLbl: document.getElementById("banner-remain-label"),
   progressFill   : document.getElementById("progress-fill"),
+
+  currencySelect  : document.getElementById("currency-select"),
+  saveCurrencyBtn : document.getElementById("save-currency-btn"),
+  currencyConfirm : document.getElementById("currency-confirm"),
 
   budgetInput    : document.getElementById("budget-input"),
   saveBudgetBtn  : document.getElementById("save-budget-btn"),
@@ -960,8 +1060,15 @@ auth.onAuthStateChanged(user => {
     dom.monthFilter.value    = thisYearMonth();
     dom.catMonthFilter.value = thisYearMonth();
 
-    // Fetch budget once, then start the real-time expense listener
-    loadBudgetFromFirestore().then(() => {
+    // Populate currency dropdown (done once — list never changes)
+    dom.currencySelect.innerHTML = CURRENCIES.map(c =>
+      `<option value="${c.code}">${c.symbol} — ${c.name} (${c.code})</option>`
+    ).join("");
+
+    // Fetch budget + currency, then start the real-time expense listener
+    Promise.all([loadBudgetFromFirestore(), loadCurrencyFromFirestore()]).then(() => {
+      // Set dropdown to the loaded currency
+      dom.currencySelect.value = currentCurrency.code;
       startExpenseListener();
       refreshBudgetBannerUI();
       syncSettingsUI();
@@ -1099,8 +1206,12 @@ async function deleteAllExpenses() {
    SECTION 13 — FORMATTING HELPERS
    ========================================================================== */
 
+/**
+ * Format a number using the currently selected currency symbol.
+ * e.g. formatCurrency(1234.5) → "₦1,234.50" when NGN is selected.
+ */
 function formatCurrency(n) {
-  return "$" + n.toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return currentCurrency.symbol + n.toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
 }
 
 function formatDate(iso) {
@@ -1534,6 +1645,7 @@ async function handleClearBudget() {
 }
 
 function syncSettingsUI() {
+  // Budget label
   if (currentBudget !== null) {
     dom.budgetConfirm.textContent = `Current target: ${formatCurrency(currentBudget)}`;
     dom.budgetInput.value         = currentBudget;
@@ -1541,6 +1653,10 @@ function syncSettingsUI() {
     dom.budgetConfirm.textContent = "No budget target set.";
     dom.budgetInput.value         = "";
   }
+  // Currency label
+  dom.currencyConfirm.textContent =
+    `Current currency: ${currentCurrency.symbol} ${currentCurrency.name} (${currentCurrency.code})`;
+  dom.currencySelect.value = currentCurrency.code;
 }
 
 /* ==========================================================================
@@ -1584,6 +1700,13 @@ dom.catClearMonth.addEventListener("click", () => {
 dom.saveBudgetBtn.addEventListener("click", handleSaveBudget);
 dom.clearBudgetBtn.addEventListener("click", handleClearBudget);
 dom.clearAllBtn.addEventListener("click", deleteAllExpenses);
+
+// Currency selector
+dom.saveCurrencyBtn.addEventListener("click", async () => {
+  await saveCurrencyToFirestore(dom.currencySelect.value);
+  showToast({ type:"success", title:"Currency Updated",
+    message:`Now using ${currentCurrency.name} (${currentCurrency.symbol})`, durationMs:3000 });
+});
 </script>
 </body>
 </html>
