@@ -473,6 +473,34 @@
     .toast.danger  { border-left: 3px solid var(--danger); }
     .toast.success { border-left: 3px solid var(--success); }
 
+    /* =====================================================================
+       EXPORT TAB
+       ===================================================================== */
+    .export-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .export-stat {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .export-stat .stat-label { font-size: .75rem; color: var(--text-muted);
+                               text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .export-stat .stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-light); }
+
+    /* Preview list inside export tab — reuses expense-item styles */
+    .export-preview {
+      max-height: 320px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
     ::-webkit-scrollbar       { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -533,6 +561,7 @@
   <nav class="tabs" role="tablist">
     <button class="tab-btn active" data-tab="tracker"   role="tab">📋 Tracker</button>
     <button class="tab-btn"        data-tab="dashboard" role="tab">📊 Dashboard</button>
+    <button class="tab-btn"        data-tab="export"    role="tab">📤 Export</button>
     <button class="tab-btn"        data-tab="settings"  role="tab">⚙️ Settings</button>
   </nav>
 
@@ -641,6 +670,46 @@
           <canvas id="cat-chart"></canvas>
         </div>
         <div class="cat-grid" id="cat-grid"></div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- EXPORT TAB -->
+  <section id="tab-export" class="tab-panel" role="tabpanel">
+
+    <div class="card">
+      <h2 class="card-title">📤 Export Expenses</h2>
+      <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:20px;">
+        Pick a date range to filter your expenses, preview the results, then download as a CSV file you can open in Excel or Google Sheets.
+      </p>
+
+      <!-- Date range pickers -->
+      <div class="input-row">
+        <div class="input-group">
+          <label for="export-start">From</label>
+          <input type="date" id="export-start" />
+        </div>
+        <div class="input-group">
+          <label for="export-end">To</label>
+          <input type="date" id="export-end" />
+        </div>
+        <div class="input-group" style="flex:0; min-width:auto; justify-content:flex-end;">
+          <label style="visibility:hidden">.</label>
+          <button class="btn btn-ghost" id="export-reset-btn">Reset</button>
+        </div>
+      </div>
+
+      <!-- Summary stats for the selected range -->
+      <div class="export-summary" id="export-summary"></div>
+
+      <!-- Preview list -->
+      <div class="export-preview" id="export-preview"></div>
+
+      <!-- Download button -->
+      <div style="margin-top:20px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="export-csv-btn">⬇️ Download CSV</button>
+        <span id="export-count" style="font-size:.85rem; color:var(--text-muted);"></span>
       </div>
     </div>
 
@@ -798,6 +867,15 @@ const dom = {
   catClearMonth  : document.getElementById("cat-clear-month-btn"),
 
   toastContainer : document.getElementById("toast-container"),
+
+  // Export tab
+  exportStart    : document.getElementById("export-start"),
+  exportEnd      : document.getElementById("export-end"),
+  exportResetBtn : document.getElementById("export-reset-btn"),
+  exportSummary  : document.getElementById("export-summary"),
+  exportPreview  : document.getElementById("export-preview"),
+  exportCsvBtn   : document.getElementById("export-csv-btn"),
+  exportCount    : document.getElementById("export-count"),
 };
 
 /* ==========================================================================
@@ -1287,7 +1365,155 @@ function renderCategoryAnalysis() {
 }
 
 /* ==========================================================================
-   SECTION 18 — SETTINGS HANDLERS
+   SECTION 18 — EXPORT: DATE RANGE FILTER + CSV DOWNLOAD
+   ========================================================================== */
+
+/**
+ * Filter currentExpenses by the selected date range and render:
+ *   - summary cards (total, count, average, top category)
+ *   - a scrollable preview list
+ *   - the count label next to the download button
+ */
+function renderExport() {
+  const start = dom.exportStart.value; // "YYYY-MM-DD" or ""
+  const end   = dom.exportEnd.value;
+
+  // Filter: include expense if it falls within [start, end] (inclusive).
+  // If a boundary is empty, that side is open-ended.
+  const filtered = currentExpenses.filter(e => {
+    if (start && e.date < start) return false;
+    if (end   && e.date > end)   return false;
+    return true;
+  }).sort((a, b) => b.date.localeCompare(a.date)); // newest first
+
+  const count      = filtered.length;
+  const total      = filtered.reduce((s, e) => s + e.amount, 0);
+  const average    = count > 0 ? total / count : 0;
+
+  // Find the top-spending category
+  const catTotals = {};
+  filtered.forEach(e => { catTotals[e.category] = (catTotals[e.category] || 0) + e.amount; });
+  const topCat = Object.entries(catTotals).sort((a,b) => b[1]-a[1])[0];
+
+  // ── Summary cards ────────────────────────────────────────────────────────
+  dom.exportSummary.innerHTML = `
+    <div class="export-stat">
+      <div class="stat-label">Total Spent</div>
+      <div class="stat-value">${formatCurrency(total)}</div>
+    </div>
+    <div class="export-stat">
+      <div class="stat-label">Transactions</div>
+      <div class="stat-value">${count}</div>
+    </div>
+    <div class="export-stat">
+      <div class="stat-label">Avg per Entry</div>
+      <div class="stat-value">${formatCurrency(average)}</div>
+    </div>
+    <div class="export-stat">
+      <div class="stat-label">Top Category</div>
+      <div class="stat-value">${topCat ? topCat[0] : "—"}</div>
+    </div>`;
+
+  // ── Preview list ─────────────────────────────────────────────────────────
+  dom.exportCount.textContent = count > 0
+    ? `${count} expense${count !== 1 ? "s" : ""} found`
+    : "";
+
+  if (count === 0) {
+    dom.exportPreview.innerHTML = `
+      <div class="empty-state" style="padding:24px 0">
+        <span>🔍</span>No expenses match this date range.
+      </div>`;
+    return;
+  }
+
+  dom.exportPreview.innerHTML = filtered.map(e => `
+    <div class="expense-item">
+      <div class="expense-icon">${e.category}</div>
+      <div style="flex:1; min-width:0">
+        <div class="expense-name">${escapeHtml(e.name)}</div>
+        <div class="expense-date">${formatDate(e.date)}</div>
+      </div>
+      <div class="expense-amount">${formatCurrency(e.amount)}</div>
+    </div>`).join("");
+}
+
+/**
+ * Build a CSV string from the filtered expenses and trigger a file download.
+ * The CSV includes: Date, Description, Category, Amount
+ * Opening it in Excel or Google Sheets gives a clean spreadsheet.
+ */
+function exportToCSV() {
+  const start = dom.exportStart.value;
+  const end   = dom.exportEnd.value;
+
+  const filtered = currentExpenses.filter(e => {
+    if (start && e.date < start) return false;
+    if (end   && e.date > end)   return false;
+    return true;
+  }).sort((a, b) => a.date.localeCompare(b.date)); // oldest first in the file
+
+  if (filtered.length === 0) {
+    showToast({ type:"warn", title:"Nothing to export", message:"No expenses found for this date range." });
+    return;
+  }
+
+  // Build CSV rows — wrap fields in quotes to handle commas inside values
+  const csvRows = [
+    ["Date", "Description", "Category", "Amount ($)"].join(","), // header row
+    ...filtered.map(e => [
+      e.date,
+      `"${e.name.replace(/"/g, '""')}"`,  // escape any quotes inside the name
+      `"${e.category}"`,
+      e.amount.toFixed(2),
+    ].join(",")),
+  ];
+
+  // Add a totals row at the bottom
+  const total = filtered.reduce((s,e) => s + e.amount, 0);
+  csvRows.push(`"","TOTAL","",${total.toFixed(2)}`);
+
+  const csvContent = csvRows.join("\n");
+
+  // Create a temporary download link and click it programmatically
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  // Build a descriptive filename including the date range
+  const fromLabel = start || "all";
+  const toLabel   = end   || "today";
+  link.href     = url;
+  link.download = `spendwise_${fromLabel}_to_${toLabel}.csv`;
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  showToast({ type:"success", title:"CSV Downloaded",
+    message:`${filtered.length} expense${filtered.length!==1?"s":""} exported.`, durationMs:3000 });
+}
+
+/* ==========================================================================
+   SECTION 18B — EXPORT EVENT WIRING
+   ========================================================================== */
+
+// Re-render preview whenever either date input changes
+dom.exportStart.addEventListener("change", renderExport);
+dom.exportEnd.addEventListener("change", renderExport);
+
+// Reset clears both dates and shows all expenses
+dom.exportResetBtn.addEventListener("click", () => {
+  dom.exportStart.value = "";
+  dom.exportEnd.value   = "";
+  renderExport();
+});
+
+dom.exportCsvBtn.addEventListener("click", exportToCSV);
+
+/* ==========================================================================
+   SECTION 19 — SETTINGS HANDLERS
    ========================================================================== */
 
 async function handleSaveBudget() {
@@ -1328,6 +1554,7 @@ dom.tabBtns.forEach(btn => {
     btn.classList.add("active");
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
     if (btn.dataset.tab === "dashboard") { renderDashboard(); renderCategoryAnalysis(); }
+    if (btn.dataset.tab === "export")    { renderExport(); }
   });
 });
 
