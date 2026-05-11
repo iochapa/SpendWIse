@@ -35,24 +35,105 @@
     }
 
     /* =====================================================================
-       LIGHT MODE — overrides every design token when data-theme="light"
-       is set on <html>. All components use var(--token) so they update
-       automatically with no extra rules needed.
+       LIGHT MODE — colour palette inspired by the Upstream design system:
+       sage-green background, pure-white cards, deep-teal accent,
+       near-invisible borders, and ultra-soft shadows.
        ===================================================================== */
     [data-theme="light"] {
-      --bg:           #f4f6fb;
+      /* Page background — soft sage green, same airy feel as the reference */
+      --bg:           #e4ede7;
+
+      /* Card surfaces — pure white so content pops cleanly */
       --surface:      #ffffff;
-      --surface-alt:  #eef0f8;
-      --border:       #dde1f0;
-      --accent:       #6c63ff;
-      --accent-light: #5a52e0;
-      --accent-glow:  rgba(108,99,255,.15);
-      --success:      #059669;
-      --warning:      #d97706;
-      --danger:       #dc2626;
-      --text:         #1a1d27;
-      --text-muted:   #6b7280;
-      --shadow:       0 4px 24px rgba(0,0,0,.1);
+
+      /* Slightly tinted white for inputs, alternate rows, badges */
+      --surface-alt:  #f2f7f4;
+
+      /* Borders almost invisible — just a whisper of green-gray */
+      --border:       #daeae0;
+
+      /* Primary action colour — deep teal matching the reference CTA button */
+      --accent:       #0a7060;
+      --accent-light: #0d9488;
+      --accent-glow:  rgba(10,112,96,.15);
+
+      /* Semantic colours tuned to the same teal family */
+      --success:      #0a7060;   /* teal — under-budget, positive states   */
+      --warning:      #f59e0b;   /* amber — matches "In development" badge  */
+      --danger:       #e53e3e;   /* red — over-budget, destructive actions  */
+
+      /* Typography */
+      --text:         #111827;   /* near-black — same weight as reference   */
+      --text-muted:   #6b7280;   /* medium gray                             */
+
+      /* Shadow — barely perceptible depth, cards float gently */
+      --shadow:       0 1px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+    }
+
+    /* In light mode the gradient header title should use teal tones */
+    [data-theme="light"] .app-header-left h1,
+    [data-theme="light"] .login-card h1 {
+      background: linear-gradient(135deg, #0a7060, #2dd4bf);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* Inputs in light mode need explicit white background & dark text */
+    [data-theme="light"] input[type="text"],
+    [data-theme="light"] input[type="number"],
+    [data-theme="light"] input[type="month"],
+    [data-theme="light"] input[type="date"],
+    [data-theme="light"] select {
+      background: #ffffff;
+      color: #111827;
+      border-color: #daeae0;
+    }
+
+    /* Tab active state uses teal in light mode */
+    [data-theme="light"] .tab-btn.active {
+      background: #0a7060;
+    }
+
+    /* Expense amounts in light mode — swap purple for teal */
+    [data-theme="light"] .expense-amount,
+    [data-theme="light"] .total-value {
+      color: #0a7060;
+    }
+
+    /* Budget banner spent value */
+    [data-theme="light"] .stat-value.spent { color: #0a7060; }
+
+    /* Progress bar — teal family */
+    [data-theme="light"] .progress-fill       { background: #0a7060; }
+    [data-theme="light"] .progress-fill.warn  { background: #f59e0b; }
+    [data-theme="light"] .progress-fill.over  { background: #e53e3e; }
+
+    /* Category bar fills */
+    [data-theme="light"] .cat-bar-fill { opacity: .9; }
+
+    /* Month-over-month change colours */
+    [data-theme="light"] .mom-change.down { color: #0a7060; }
+    [data-theme="light"] .mom-change.up   { color: #e53e3e; }
+
+    /* Toast borders */
+    [data-theme="light"] .toast {
+      box-shadow: 0 4px 20px rgba(0,0,0,.12);
+    }
+
+    /* Accent light for export stat values */
+    [data-theme="light"] .export-stat .stat-value { color: #0a7060; }
+
+    /* Dark/light theme preview mini-cards in Settings */
+    [data-theme="light"] .theme-option.active { border-color: #0a7060; }
+    [data-theme="light"] .theme-option.active .theme-label { color: #0a7060; }
+
+    /* Primary buttons use teal in light mode */
+    [data-theme="light"] .btn-primary { background: #0a7060; }
+
+    /* Light mode body gets a soft sage-green gradient matching the reference */
+    [data-theme="light"] body {
+      background: linear-gradient(160deg, #c8ddd0 0%, #e4ede7 40%, #d4e8d8 100%);
+      min-height: 100vh;
     }
 
     /* Smooth transition when switching themes */
