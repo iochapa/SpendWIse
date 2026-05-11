@@ -34,6 +34,48 @@
       --shadow:       0 4px 24px rgba(0,0,0,.4);
     }
 
+    /* =====================================================================
+       LIGHT MODE — overrides every design token when data-theme="light"
+       is set on <html>. All components use var(--token) so they update
+       automatically with no extra rules needed.
+       ===================================================================== */
+    [data-theme="light"] {
+      --bg:           #f4f6fb;
+      --surface:      #ffffff;
+      --surface-alt:  #eef0f8;
+      --border:       #dde1f0;
+      --accent:       #6c63ff;
+      --accent-light: #5a52e0;
+      --accent-glow:  rgba(108,99,255,.15);
+      --success:      #059669;
+      --warning:      #d97706;
+      --danger:       #dc2626;
+      --text:         #1a1d27;
+      --text-muted:   #6b7280;
+      --shadow:       0 4px 24px rgba(0,0,0,.1);
+    }
+
+    /* Smooth transition when switching themes */
+    body, .card, .budget-banner, .tabs, .tab-btn,
+    input, select, .expense-item, .toast, .mom-card,
+    .cat-card, .export-stat, .sync-badge {
+      transition: background .25s, border-color .25s, color .25s, box-shadow .25s;
+    }
+
+    /* Theme toggle button in the header */
+    .btn-theme {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background .2s, color .2s;
+      line-height: 1;
+    }
+    .btn-theme:hover { color: var(--text); }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -474,6 +516,38 @@
     .toast.success { border-left: 3px solid var(--success); }
 
     /* =====================================================================
+       THEME PICKER CARDS (in Settings)
+       ===================================================================== */
+    .theme-option {
+      cursor: pointer;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      overflow: hidden;
+      width: 120px;
+      transition: border-color .2s, transform .15s;
+    }
+    .theme-option:hover           { transform: translateY(-2px); }
+    .theme-option.active          { border-color: var(--accent); }
+    .theme-preview {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+    }
+    .dark-preview  { background: #0f1117; }
+    .light-preview { background: #f4f6fb; }
+    .theme-label {
+      background: var(--surface-alt);
+      text-align: center;
+      padding: 6px 0;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .theme-option.active .theme-label { color: var(--accent); }
+
+    /* =====================================================================
        EXPORT TAB
        ===================================================================== */
     .export-summary {
@@ -552,6 +626,8 @@
         <span class="sync-dot" id="sync-dot"></span>
         <span id="sync-label">Synced</span>
       </span>
+      <!-- Theme toggle — icon swaps between ☀️ and 🌙 -->
+      <button class="btn-theme" id="theme-toggle-btn" title="Toggle light/dark mode">🌙</button>
       <img id="user-avatar" class="user-avatar" src="" alt="avatar" style="display:none" />
       <span class="user-name" id="user-name"></span>
       <button class="btn btn-signout" id="signout-btn">Sign out</button>
@@ -718,6 +794,26 @@
   <!-- SETTINGS TAB -->
   <section id="tab-settings" class="tab-panel" role="tabpanel">
 
+    <!-- Theme Card -->
+    <div class="card">
+      <h2 class="card-title">🎨 Appearance</h2>
+      <p style="color:var(--text-muted); font-size:.88rem; margin-bottom:16px;">
+        Choose between dark and light mode. Your preference is saved and synced across all devices.
+      </p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <!-- Each option is a clickable card -->
+        <div class="theme-option" id="theme-dark" data-mode="dark">
+          <div class="theme-preview dark-preview"></div>
+          <div class="theme-label">🌙 Dark</div>
+        </div>
+        <div class="theme-option" id="theme-light" data-mode="light">
+          <div class="theme-preview light-preview"></div>
+          <div class="theme-label">☀️ Light</div>
+        </div>
+      </div>
+      <p id="theme-confirm" style="margin-top:12px; font-size:.85rem; color:var(--success);"></p>
+    </div>
+
     <!-- Currency Selector Card -->
     <div class="card">
       <h2 class="card-title">💱 Currency</h2>
@@ -839,6 +935,7 @@ const CURRENCIES = [
 let currentExpenses      = [];                // kept in sync by onSnapshot
 let currentBudget        = null;              // number | null
 let currentCurrency      = CURRENCIES[0];     // default USD until loaded from Firestore
+let currentTheme         = "dark";            // "dark" | "light"
 let currentUser          = null;              // Firebase User object when signed in
 let unsubscribeExpenses  = null;              // cleanup fn returned by onSnapshot
 
@@ -855,6 +952,49 @@ function expensesRef() {
 /** Firestore document for the signed-in user's budget setting. */
 function budgetDocRef() {
   return db.collection("users").doc(currentUser.uid).collection("settings").doc("budget");
+}
+
+/** Firestore document for the signed-in user's theme preference. */
+function themeDocRef() {
+  return db.collection("users").doc(currentUser.uid).collection("settings").doc("theme");
+}
+
+/** Apply the given theme mode to the page and update all UI indicators. */
+function applyTheme(mode) {
+  currentTheme = mode;
+  // Setting data-theme on <html> triggers the CSS variable overrides
+  document.documentElement.setAttribute("data-theme", mode);
+
+  // Header toggle button icon
+  dom.themeToggleBtn.textContent = mode === "light" ? "🌙" : "☀️";
+  dom.themeToggleBtn.title       = mode === "light" ? "Switch to dark mode" : "Switch to light mode";
+
+  // Settings picker — highlight the active card
+  dom.themeDarkCard.classList.toggle("active",  mode === "dark");
+  dom.themeLightCard.classList.toggle("active", mode === "light");
+
+  dom.themeConfirm.textContent = mode === "light" ? "☀️ Light mode active" : "🌙 Dark mode active";
+}
+
+/** Read saved theme from Firestore. Falls back to dark if not set. */
+async function loadThemeFromFirestore() {
+  try {
+    const snap = await themeDocRef().get();
+    applyTheme(snap.exists ? (snap.data().mode || "dark") : "dark");
+  } catch {
+    applyTheme("dark");
+  }
+}
+
+/** Save theme preference to Firestore and apply immediately. */
+async function saveThemeToFirestore(mode) {
+  applyTheme(mode); // apply instantly — don't wait for the write
+  setSyncing(true);
+  try {
+    await themeDocRef().set({ mode });
+  } finally {
+    setSyncing(false);
+  }
 }
 
 /** Firestore document for the signed-in user's currency preference. */
@@ -948,6 +1088,11 @@ const dom = {
   bannerRemain   : document.getElementById("banner-remain"),
   bannerRemainLbl: document.getElementById("banner-remain-label"),
   progressFill   : document.getElementById("progress-fill"),
+
+  themeToggleBtn  : document.getElementById("theme-toggle-btn"),
+  themeDarkCard   : document.getElementById("theme-dark"),
+  themeLightCard  : document.getElementById("theme-light"),
+  themeConfirm    : document.getElementById("theme-confirm"),
 
   currencySelect  : document.getElementById("currency-select"),
   saveCurrencyBtn : document.getElementById("save-currency-btn"),
@@ -1065,9 +1210,12 @@ auth.onAuthStateChanged(user => {
       `<option value="${c.code}">${c.symbol} — ${c.name} (${c.code})</option>`
     ).join("");
 
-    // Fetch budget + currency, then start the real-time expense listener
-    Promise.all([loadBudgetFromFirestore(), loadCurrencyFromFirestore()]).then(() => {
-      // Set dropdown to the loaded currency
+    // Fetch budget, currency, and theme — then start the real-time expense listener
+    Promise.all([
+      loadBudgetFromFirestore(),
+      loadCurrencyFromFirestore(),
+      loadThemeFromFirestore(),
+    ]).then(() => {
       dom.currencySelect.value = currentCurrency.code;
       startExpenseListener();
       refreshBudgetBannerUI();
@@ -1700,6 +1848,18 @@ dom.catClearMonth.addEventListener("click", () => {
 dom.saveBudgetBtn.addEventListener("click", handleSaveBudget);
 dom.clearBudgetBtn.addEventListener("click", handleClearBudget);
 dom.clearAllBtn.addEventListener("click", deleteAllExpenses);
+
+// Header theme toggle — flips between dark and light on each click
+dom.themeToggleBtn.addEventListener("click", () => {
+  saveThemeToFirestore(currentTheme === "dark" ? "light" : "dark");
+});
+
+// Settings theme picker cards
+[dom.themeDarkCard, dom.themeLightCard].forEach(card => {
+  card.addEventListener("click", () => {
+    saveThemeToFirestore(card.dataset.mode);
+  });
+});
 
 // Currency selector
 dom.saveCurrencyBtn.addEventListener("click", async () => {
